@@ -2,44 +2,44 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Pintos: F5 debug",
+            "name": "debug_pintos",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/pintos/.debug-build/kernel.o",
-            "cwd": "${workspaceFolder}/pintos/.debug-build",
+            "program": "${workspaceFolder}/pintos/userprog/build/kernel.o",
+            "cwd": "${workspaceFolder}/pintos/userprog/build",
             "MIMode": "gdb",
             "targetArchitecture": "x64",
             "miDebuggerPath": "/usr/bin/gdb",
-            "miDebuggerServerAddress": "127.0.0.1:1234",
+            "miDebuggerServerAddress": "127.0.0.1:57391",
             "debugServerPath": "/usr/bin/python3",
-            "debugServerArgs": "\"${workspaceFolder}/.devcontainer/debug.py\" ${config:pintos.project}",
-            "serverStarted": "PINTOS_GDB_READY",
+            "debugServerArgs": "-u \"${workspaceFolder}/.vscode/pintos-debug.py\"",
+            "serverStarted": "Pintos GDB server ready",
             "serverLaunchTimeout": 20000,
             "filterStdout": true,
-            "filterStderr": true,
-            "preLaunchTask": "Pintos: prepare debug",
-            "stopAtEntry": true,
+            "filterStderr": false,
             "hardwareBreakpoints": {
-                "require": true,
-                "limit": 4
+                "require": true
             },
-            "setupCommands": [
-                {
-                    "text": "set architecture i386:x86-64"
-                }
-            ],
             "customLaunchSetupCommands": [
                 {
-                    "text": "-file-exec-and-symbols \"${workspaceFolder}/pintos/.debug-build/kernel.o\""
+                    "text": "-file-exec-and-symbols \"${workspaceFolder}/pintos/userprog/build/kernel.o\""
                 },
                 {
-                    "text": "-target-select remote 127.0.0.1:1234"
+                    "text": "-target-select remote 127.0.0.1:57391"
                 },
                 {
-                    "text": "-break-insert -h -t main"
+                    "text": "-interpreter-exec console \"source ${workspaceFolder}/.vscode/pintos-gdb.py\""
+                },
+                {
+                    "text": "-interpreter-exec console \"pintos-sequence ${workspaceFolder}/pintos/userprog/build/debug/session.json\""
                 }
             ],
-            "launchCompleteCommand": "exec-continue"
+            "launchCompleteCommand": "exec-continue",
+            "stopAtEntry": false,
+            "externalConsole": false,
+            "internalConsoleOptions": "openOnSessionStart",
+            "preLaunchTask": "Build Pintos",
+            "postDebugTask": "Show Pintos test result"
         }
     ]
 }
