@@ -43,7 +43,7 @@ class PintosSequence:
 
     def load_user_symbols(self, test):
         self.unload_user_symbols()
-        for directory in ("tests/userprog", "tests/userprog/no-vm", "tests/filesys/base"):
+        for directory in ("tests/vm", "tests/vm/cow", "tests/userprog", "tests/filesys/base"):
             executable = self.build / directory / test
             if executable.is_file():
                 # ELF section addresses identify the user program's load address.

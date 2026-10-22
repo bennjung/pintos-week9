@@ -29,11 +29,11 @@ def stop_requested(signum, frame):
 
 
 def test_relative_path(root, test):
-    """Find the checker for a Project 2 or Project 1 regression test."""
+    """Find the checker for a VM, COW, or previous-project regression test."""
     if not isinstance(test, str) or "/" in test or "\\" in test:
         raise ValueError(f"Unknown Pintos test: {test}")
     for directory in map(Path, (
-        "tests/userprog", "tests/userprog/no-vm", "tests/filesys/base", "tests/threads",
+        "tests/vm", "tests/vm/cow", "tests/userprog", "tests/filesys/base", "tests/threads",
     )):
         if (root / "pintos" / directory / f"{test}.ck").is_file():
             return directory / test
@@ -58,13 +58,22 @@ def test_launch_spec(root, build, test):
     kernel_args = words[separator + 1:words.index("<", separator)]
     files = []
     fs_size = 10
+    memory = 20
+    swap_size = None
     for index, option in enumerate(options):
         if option == "-p":
             host, _, guest = options[index + 1].partition(":")
             files.append((build / host, guest or Path(host).name))
         elif option.startswith("--fs-disk="):
             fs_size = int(option.split("=", 1)[1])
-    return {"kernel_args": kernel_args, "files": files, "fs_size": fs_size}
+        elif option == "-m":
+            memory = int(options[index + 1])
+        elif option.startswith("--swap-disk="):
+            swap_size = int(option.split("=", 1)[1])
+    return {
+        "kernel_args": kernel_args, "files": files, "fs_size": fs_size,
+        "memory": memory, "swap_size": swap_size,
+    }
 
 
 def check_result(root, build, test):
@@ -150,6 +159,7 @@ class DebugVM:
         self.disk = output_dir / "boot.dsk"
         self.filesys_disk = output_dir / "filesys.dsk"
         self.scratch_disk = output_dir / "scratch.dsk"
+        self.swap_disk = output_dir / "swap.dsk"
         self.specs = {}
 
     def prepare_test(self, test):
@@ -157,6 +167,15 @@ class DebugVM:
         if test not in self.specs:
             self.specs[test] = test_launch_spec(self.root, self.build, test)
         spec = self.specs[test]
+        missing = [str(host.relative_to(self.build)) for host, _ in spec["files"]
+                   if not host.is_file()]
+        if missing:
+            completed = subprocess.run(
+                ["make", "--no-print-directory", *missing], cwd=self.build,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            if completed.returncode:
+                raise RuntimeError(f"Cannot prepare files for {test}: {completed.stderr.strip()}")
         kernel_args = spec["kernel_args"]
         run_index = kernel_args.index("run")
         puts = [word for _, guest in spec["files"] for word in ("put", guest)]
@@ -169,6 +188,9 @@ class DebugVM:
             disk.truncate(0xfc000 * spec["fs_size"])
             disk.flush()
             os.fsync(disk.fileno())
+        if spec["swap_size"] is not None:
+            with self.swap_disk.open("wb") as disk:
+                disk.truncate(0xfc000 * spec["swap_size"])
         # This is the PUT transfer format used by pintos/utils/pintos.
         with self.scratch_disk.open("wb") as disk:
             for host, _ in spec["files"]:
@@ -229,8 +251,13 @@ class DebugVM:
             "-drive", f"file={self.disk},format=raw,index=0,media=disk",
             "-drive", f"file={self.filesys_disk},format=raw,index=1,media=disk",
             "-drive", f"file={self.scratch_disk},format=raw,index=2,media=disk",
-            "-cpu", "qemu64", "-m", "20", "-serial", "mon:stdio",
+            "-cpu", "qemu64", "-m", str(self.specs[self.test]["memory"]),
+            "-serial", "mon:stdio",
         ]
+        if self.specs[self.test]["swap_size"] is not None:
+            command.extend([
+                "-drive", f"file={self.swap_disk},format=raw,index=3,media=disk",
+            ])
         if self.icount is not None:
             command.extend(["-icount", self.icount])
         if not self.sequence:
@@ -280,6 +307,7 @@ class DebugVM:
                 self.process.wait()
         for reader in self.readers:
             reader.join(timeout=3)
+        self.readers = []
         if self.process:
             self.process.stdout.close()
             self.process.stderr.close()
@@ -292,6 +320,7 @@ class DebugVM:
         self.disk.unlink(missing_ok=True)
         self.filesys_disk.unlink(missing_ok=True)
         self.scratch_disk.unlink(missing_ok=True)
+        self.swap_disk.unlink(missing_ok=True)
 
 
 def write_session(output_dir, session):
@@ -301,6 +330,13 @@ def write_session(output_dir, session):
 
 
 def start_debug(root, build, output_dir, tests, icount=None):
+    specs = {test: test_launch_spec(root, build, test) for test in tests}
+    hardware = {(spec["memory"], spec["swap_size"]) for spec in specs.values()}
+    if len(hardware) > 1:
+        raise RuntimeError(
+            "These tests require different RAM or swap sizes. "
+            "Run them separately, or select a range with matching RAM and swap settings."
+        )
     signal.signal(signal.SIGTERM, stop_requested)
     signal.signal(signal.SIGINT, stop_requested)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -326,6 +362,7 @@ def start_debug(root, build, output_dir, tests, icount=None):
                 root, build, run_dir, tests[0],
                 sequence=len(tests) > 1, icount=icount,
             )
+            vm.specs = specs
             vm.start()
             session["status"] = "running"
             write_session(output_dir, session)
@@ -399,7 +436,7 @@ def main():
     parser.add_argument("test", nargs="?", help="Override the test name, number, or range in pintos-debug.json")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    build = root / "pintos/userprog/build"
+    build = root / "pintos/vm/build"
     output_dir = build / "debug"
     if args.check and args.test is None:
         manifest = output_dir / "session.json"

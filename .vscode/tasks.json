@@ -6,7 +6,7 @@
             "type": "process",
             "command": "make",
             "options": {
-                "cwd": "${workspaceFolder}/pintos/userprog"
+                "cwd": "${workspaceFolder}/pintos/vm"
             },
             "problemMatcher": [
                 "$gcc"
@@ -42,14 +42,14 @@
             }
         },
         {
-            "label": "Run Pintos (all threads tests)",
+            "label": "Run Pintos (all VM and regression tests)",
             "type": "process",
             "command": "make",
             "args": [
                 "check"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/pintos/threads",
+                "cwd": "${workspaceFolder}/pintos/vm",
                 "env": {
                     "PATH": "${workspaceFolder}/pintos/utils:${env:PATH}"
                 }
