@@ -5,8 +5,8 @@
             "name": "debug_pintos",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/pintos/userprog/build/kernel.o",
-            "cwd": "${workspaceFolder}/pintos/userprog/build",
+            "program": "${workspaceFolder}/pintos/vm/build/kernel.o",
+            "cwd": "${workspaceFolder}/pintos/vm/build",
             "MIMode": "gdb",
             "targetArchitecture": "x64",
             "miDebuggerPath": "/usr/bin/gdb",
@@ -22,7 +22,7 @@
             },
             "customLaunchSetupCommands": [
                 {
-                    "text": "-file-exec-and-symbols \"${workspaceFolder}/pintos/userprog/build/kernel.o\""
+                    "text": "-file-exec-and-symbols \"${workspaceFolder}/pintos/vm/build/kernel.o\""
                 },
                 {
                     "text": "-target-select remote 127.0.0.1:57391"
@@ -31,7 +31,7 @@
                     "text": "-interpreter-exec console \"source ${workspaceFolder}/.vscode/pintos-gdb.py\""
                 },
                 {
-                    "text": "-interpreter-exec console \"pintos-sequence ${workspaceFolder}/pintos/userprog/build/debug/session.json\""
+                    "text": "-interpreter-exec console \"pintos-sequence ${workspaceFolder}/pintos/vm/build/debug/session.json\""
                 }
             ],
             "launchCompleteCommand": "exec-continue",
