@@ -64,17 +64,29 @@ err:
 struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct page *page = NULL;
+	struct hash_elem *hash_temp;
+	struct page key = {.va = pg_round_down(va)};
+	
 	/* TODO: Fill this function. */
+	// va로 뭐가 들어옴? upage == uninit page 
+	hash_temp = hash_find(spt->hashtable, &key.hash_elem);
+	page = hash_entry(hash_temp, struct page, hash_elem);
 
 	return page;
 }
 
 /* Insert PAGE into spt with validation. */
 bool
-spt_insert_page (struct supplemental_page_table *spt UNUSED,
-		struct page *page UNUSED) {
+spt_insert_page (struct supplemental_page_table *spt,
+		struct page *page) {
 	int succ = false;
 	/* TODO: Fill this function. */
+	struct hash_elem *hash_temp = hash_insert(spt->hashtable, &page->hash_elem);
+
+	// 1. insert page.. 
+	if (hash_temp == NULL){
+		succ = true;
+	}
 
 	return succ;
 }
@@ -174,6 +186,9 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	// spt 구조체 hash table 초기화
+	hash_init(spt->hashtable, page_hash, page_less, NULL);
+
 }
 
 /* Copy supplemental page table from src to dst */
@@ -188,3 +203,18 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
 }
+
+unsigned
+page_hash (const struct hash_elem *p_, void *aux){
+	const struct page *p = hash_entry (p_, struct page, hash_elem);
+  	return hash_bytes (&p->va, sizeof p->va);
+}
+
+bool
+page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux) {
+	const struct page *a = hash_entry (a_, struct page, hash_elem);
+  	const struct page *b = hash_entry (b_, struct page, hash_elem);
+
+  	return a->va < b->va;
+}
+
