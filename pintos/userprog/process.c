@@ -43,6 +43,13 @@ struct fork_args {
 	bool success;
 };
 
+struct binfo {
+	struct file *file;
+	off_t ofs; // int32_t
+	size_t rsize; //unsigned long
+	size_t zsize; 
+};
+
 
 /* General process initializer for initd and other process. */
 static void
@@ -896,6 +903,23 @@ install_page (void *upage, void *kpage, bool writable) {
 static bool
 lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
+	struct binfo *seginfo = (struct binfo *)aux;
+	lock_acquire(&file_lock);
+	int32_t fsize = (int32_t)seginfo->rsize;
+	// page->va X
+	if (fsize != file_read_at(seginfo->file, page->frame->kva, fsize, seginfo->ofs )){
+		lock_release(&file_lock);
+		return false;
+	}
+	// 남는 부분 0으로 바꿔주기
+	if (PGSIZE > fsize){
+		uint8_t *zerost = (uint8_t *)page->frame->kva + fsize;
+		memset((void *)zerost, 0, seginfo->zsize);
+	}
+
+	lock_release(&file_lock);
+	free(aux);
+	return true;
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
 }
@@ -920,7 +944,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
-
 	while (read_bytes > 0 || zero_bytes > 0) {
 		/* Do calculate how to fill this page.
 		 * We will read PAGE_READ_BYTES bytes from FILE
@@ -929,15 +952,23 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
+		struct binfo *aux = NULL;
+		aux = malloc(sizeof(struct binfo));
+
+		aux->file = file;
+		aux->ofs = ofs;
+		aux->rsize = page_read_bytes;
+		aux->zsize = page_zero_bytes;
+		
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
+					writable, lazy_load_segment, (void *)aux))
 			return false;
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += page_read_bytes;
 	}
 	return true;
 }
@@ -952,7 +983,15 @@ setup_stack (struct intr_frame *if_) {
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
-
+	
+	if (!vm_alloc_page(VM_ANON |  VM_MARKER_0, stack_bottom, true)){
+		return false;
+	}
+	if (!vm_claim_page(stack_bottom)){
+		return false;
+	}
+	if_->rsp = USER_STACK;
+	success = true;
 	return success;
 }
 #endif /* VM */
