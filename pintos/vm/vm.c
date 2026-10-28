@@ -4,6 +4,8 @@
 #include "threads/vaddr.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
+#include "filesys/file.h"
+#include "lib/string.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -37,8 +39,12 @@ page_get_type (struct page *page) {
 static struct frame *vm_get_victim (void);
 static bool vm_do_claim_page (struct page *page);
 static struct frame *vm_evict_frame (void);
+hash_action_func * page_destroy(struct hash_elem *e, void *aux UNUSED);
 unsigned page_hash(const struct hash_elem *p_, void *aux);
 bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux);
+bool page_uninit_copy(struct page *src, struct page *dst);
+bool page_frame_copy(struct page *src, struct page *dst);
+
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
@@ -95,7 +101,7 @@ spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct page key = {.va = pg_round_down(va)};
 	
 	/* TODO: Fill this function. */
-	hash_temp = hash_find(&spt->hashtable, &key.hash_elem);
+	hash_temp = hash_find(&spt->hash_table, &key.hash_elem);
 	// empty check 
 	if (hash_temp == NULL){
 		return NULL;
@@ -111,7 +117,7 @@ spt_insert_page (struct supplemental_page_table *spt,
 		struct page *page) {
 	bool succ = false;
 	/* TODO: Fill this function. */
-	struct hash_elem *hash_temp = hash_insert(&spt->hashtable, &page->hash_elem);
+	struct hash_elem *hash_temp = hash_insert(&spt->hash_table, &page->hash_elem);
 
 	// 1. insert page.. 
 	if (hash_temp == NULL){
@@ -185,10 +191,9 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	// valid fault address 
-	// kernel base >= addr 
-	// if (is_kernel_vaddr(addr) || (int) addr <= USER_STACK){
-	// 	return false;
-	// }
+	if (is_kernel_vaddr(addr) || (int) addr >= USER_STACK){
+		return false;
+	}
 	
 	page = spt_find_page(spt, addr);
 	if (page == NULL){
@@ -241,7 +246,7 @@ vm_do_claim_page (struct page *page) {
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 	// spt 구조체 hash table 초기화
-	hash_init(&spt->hashtable, page_hash, page_less, NULL);
+	hash_init(&spt->hash_table, page_hash, page_less, NULL);
 
 }
 
@@ -249,15 +254,119 @@ supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
+	
+	// dst 의 elem 을 src로 복사해주기.. vs spt_insert_page 쓰기 
+	// hash table 순회
+	struct hash_iterator i;
+	hash_first(&i, &src->hash_table);
+   	while (hash_next(&i)) {
+   		struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
+		struct page *dst_page = malloc(sizeof *dst_page);
+
+		if (dst_page == NULL){
+			return false;
+		}
+		// copy member variables 
+		*dst_page = *src_page;
+
+		// if page type => UNINIT
+		if (VM_TYPE(src_page->operations->type) == 0){
+			dst_page->uninit.aux = NULL;
+			if (!page_uninit_copy(src_page, dst_page)){
+				vm_dealloc_page(dst_page);
+				return false;
+			}
+		} // else page type => ANON, FILE
+		else {
+			if (!page_frame_copy(src_page, dst_page)){
+				vm_dealloc_page(dst_page);
+				return false;
+			}
+		}
+		
+		if ( (hash_insert(&dst->hash_table, &dst_page->hash_elem)) != NULL){
+			vm_dealloc_page(dst_page);
+			return false;
+		}
+   	
+   	}
+	return true;
 }
 
-/* Free the resource hold by the supplemental page table */
+bool
+page_uninit_copy(struct page *src, struct page *dst){
+	
+	if (src->uninit.aux == NULL){
+		return true;
+	}
+	
+	struct binfo *aux = malloc(sizeof *aux); 
+	if (aux == NULL){
+		free(aux);
+		return false;
+	}
+	memcpy(aux, src->uninit.aux, sizeof *aux);
+
+	struct file *file = file_duplicate(aux->file);
+	if (file == NULL){
+		free(aux);
+		return false;
+	}
+	aux->file = file;
+	dst->uninit.aux = aux;
+	return true;
+}
+
+bool 
+page_frame_copy(struct page *src, struct page *dst){
+	// 0. frame 할당 
+	dst->frame = vm_get_frame();
+
+	// 1. frame 내용 복사 
+	memcpy(dst->frame->kva, src->frame->kva, PGSIZE);
+	
+	// 2. frame <-> page 링킹 
+	dst->frame->page = dst;
+
+	// 3. 페이지 테이블 매핑 
+	if (!pml4_set_page(thread_current()->pml4, dst->va, dst->frame->kva, dst->writable)){
+		return false;
+	}
+
+	return true;
+	
+}
+
+// ALTER WAY -> process_exec() 재 초기화 필수 supplemental_page_table_init (&thread_current ()->spt);
+// void supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
+// 	/* TODO: Destroy all the supplemental_page_table hold by thread and
+// 	 * TODO: writeback all the modified contents to the storage. */
+// 	struct hash_iterator i;
+// 	hash_first(&i, &spt->hash_table);
+// 	struct hash_elem *e = (hash_next(&i));
+//    	while ( e!= NULL ) {
+//    		struct page *page = hash_entry(hash_cur(&i), struct page, hash_elem);
+// 		e = hash_next(&i);
+// 		vm_dealloc_page(page);
+//    	}
+// 	free(spt->hash_table.buckets);
+
+// }
 void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	hash_clear(&spt->hash_table, page_destroy);
+
 }
-//uint64_t 
+
+hash_action_func *
+page_destroy(struct hash_elem *e, void *aux UNUSED){
+	struct page *page = hash_entry(e, struct page, hash_elem);
+    vm_dealloc_page(page);
+}
+
+
 unsigned
 page_hash (const struct hash_elem *p_, void *aux){
 	const struct page *p = hash_entry (p_, struct page, hash_elem);

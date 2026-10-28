@@ -43,12 +43,6 @@ struct fork_args {
 	bool success;
 };
 
-struct binfo {
-	struct file *file;
-	off_t ofs; // int32_t
-	size_t rsize; //unsigned long
-	size_t zsize; 
-};
 
 
 /* General process initializer for initd and other process. */
@@ -909,6 +903,7 @@ lazy_load_segment (struct page *page, void *aux) {
 	// page->va X
 	if (fsize != file_read_at(seginfo->file, page->frame->kva, fsize, seginfo->ofs )){
 		lock_release(&file_lock);
+		free(aux);
 		return false;
 	}
 	// 남는 부분 0으로 바꿔주기
@@ -955,7 +950,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		struct binfo *aux = NULL;
 		aux = malloc(sizeof(struct binfo));
 
-		aux->file = file;
+		aux->file = file_reopen(file);
 		aux->ofs = ofs;
 		aux->rsize = page_read_bytes;
 		aux->zsize = page_zero_bytes;

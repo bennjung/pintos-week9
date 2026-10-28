@@ -76,6 +76,11 @@ def test_launch_spec(root, build, test):
     }
 
 
+def color_result(match):
+    color = '32' if match.group().upper() == 'PASS' else '31'
+    return f'\033[{color}m{match.group()}\033[0m'
+
+
 def check_result(root, build, test):
     test_path = test_relative_path(root, test)
     output = build / test_path.with_suffix(".output")
@@ -83,7 +88,7 @@ def check_result(root, build, test):
     result.unlink(missing_ok=True)
     if not output.exists():
         print(f"[NOT RUN] {test}: no output from this debug session.", flush=True)
-        return 0
+        return None
 
     content = output.read_text(errors="replace")
     if "Powering off" not in content and not any(
@@ -91,7 +96,7 @@ def check_result(root, build, test):
     ):
         print(f"[STOPPED] {test}: debugging ended before the test finished.", flush=True)
         print(f"Output: {output}", flush=True)
-        return 0
+        return None
 
     completed = subprocess.run(
         ["perl", f"-I{root / 'pintos'}", str(root / 'pintos' / test_path.with_suffix('.ck')),
@@ -103,10 +108,25 @@ def check_result(root, build, test):
         print(f"[ERROR] {test}: the Pintos checker could not produce a result.", flush=True)
         return 1
     verdict = result.read_text().splitlines()[0]
-    print(f"\n[{verdict}] {test}", flush=True)
+    colored_verdict = re.sub(r'\b(?:PASS|FAIL)\b', color_result, verdict)
+    print(f"\n[{colored_verdict}] {test}", flush=True)
     print(f"Result: {result}", flush=True)
     return 0 if verdict == "PASS" else 1
 
+
+def check_results(root, build, tests):
+    results = [(test, check_result(root, build, test)) for test in tests]
+    passed = [test for test, result in results if result == 0]
+    failed = [test for test, result in results if result == 1]
+    summary = f"PASS : {len(passed)}, FAIL : {len(failed)}"
+    print("\n" + re.sub(r'\b(?:PASS|FAIL)\b', color_result, summary), flush=True)
+    print("\nPASS LIST", flush=True)
+    for test in passed:
+        print(f"- {test}", flush=True)
+    print("\nFAIL LIST", flush=True)
+    for test in failed:
+        print(f"- {test}", flush=True)
+    return int(bool(failed))
 
 
 def resolve_tests(root, selection, settings):
@@ -453,8 +473,7 @@ def main():
                     raise ValueError("The recorded output directory is outside the debug directory.")
             except (OSError, ValueError, KeyError, TypeError) as error:
                 parser.error(f"Cannot read the recorded debug session: {error}")
-            results = [check_result(root, run_dir, test) for test in tests]
-            return int(any(results))
+            return check_results(root, run_dir, tests)
         last_test = output_dir / "last-test"
         if last_test.is_file():
             args.test = last_test.read_text().strip()
@@ -479,7 +498,7 @@ def main():
     except ValueError as error:
         parser.error(str(error))
     if args.check:
-        return int(any([check_result(root, output_dir, test) for test in tests]))
+        return check_results(root, output_dir, tests)
     icount = args.icount
     if icount is not None and (not isinstance(icount, str) or not icount.strip()):
         parser.error("icount must be a nonempty QEMU settings string or null")

@@ -78,6 +78,14 @@ struct page_operations {
 	enum vm_type type;
 };
 
+struct binfo {
+	struct file *file;
+	off_t ofs; // int32_t
+	size_t rsize; //unsigned long
+	size_t zsize; 
+};
+
+
 #define swap_in(page, v) (page)->operations->swap_in ((page), v)
 #define swap_out(page) (page)->operations->swap_out (page)
 #define destroy(page) \
@@ -87,7 +95,7 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
-	struct hash hashtable;
+	struct hash hash_table;
 	
 };
 
