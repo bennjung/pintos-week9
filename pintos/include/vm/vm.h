@@ -2,6 +2,7 @@
 #define VM_VM_H
 #include <stdbool.h>
 #include "threads/palloc.h"
+#include "kernel/hash.h"
 
 enum vm_type {
 	/* page not initialized */
@@ -44,7 +45,8 @@ struct page {
 	const struct page_operations *operations;
 	void *va;              /* Address in terms of user space */
 	struct frame *frame;   /* Back reference for frame */
-
+	struct hash_elem hash_elem;
+	bool writable;
 	/* Your implementation */
 
 	/* Per-type data are binded into the union.
@@ -63,6 +65,16 @@ struct page {
 struct frame {
 	void *kva;
 	struct page *page;
+};
+
+struct mmap_info {
+	void *start;
+	size_t page_count;
+	struct file *file;
+	struct list_elem mmap_elem;
+	off_t ofs;
+	size_t page_read_bytes;
+	size_t page_zero_bytes;
 };
 
 /* The function table for page operations.
@@ -85,10 +97,14 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
+	struct hash hash_table;
 };
 
 #include "threads/thread.h"
+unsigned init_hash_func (const struct hash_elem *he, void *aux UNUSED);
+bool less_hash_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 void supplemental_page_table_init (struct supplemental_page_table *spt);
+struct frame *vm_get_frame (void);
 bool supplemental_page_table_copy (struct supplemental_page_table *dst,
 		struct supplemental_page_table *src);
 void supplemental_page_table_kill (struct supplemental_page_table *spt);
@@ -96,7 +112,7 @@ struct page *spt_find_page (struct supplemental_page_table *spt,
 		void *va);
 bool spt_insert_page (struct supplemental_page_table *spt, struct page *page);
 void spt_remove_page (struct supplemental_page_table *spt, struct page *page);
-
+void vm_stack_growth (void *addr);
 void vm_init (void);
 bool vm_try_handle_fault (struct intr_frame *f, void *addr, bool user,
 		bool write, bool not_present);
@@ -106,6 +122,7 @@ bool vm_try_handle_fault (struct intr_frame *f, void *addr, bool user,
 bool vm_alloc_page_with_initializer (enum vm_type type, void *upage,
 		bool writable, vm_initializer *init, void *aux);
 void vm_dealloc_page (struct page *page);
+
 bool vm_claim_page (void *va);
 enum vm_type page_get_type (struct page *page);
 

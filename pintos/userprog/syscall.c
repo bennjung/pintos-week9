@@ -17,6 +17,7 @@
 #include "filesys/filesys.h"
 #include "devices/input.h"
 #include "threads/palloc.h"
+#include "vm/vm.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -56,6 +57,8 @@ static void sys_seek (struct intr_frame *f);
 static void sys_tell (struct intr_frame *f);
 static void sys_close (struct intr_frame *f);
 static void sys_dup2(struct intr_frame *f); 
+static void sys_mmap(struct intr_frame *f);
+static void sys_munmap(struct intr_frame *f);
 
 void
 syscall_init (void) {
@@ -121,6 +124,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		case SYS_DUP2:
 			sys_dup2(f);
+			break;
+		case SYS_MMAP:
+			sys_mmap(f);
+			break;
+		case SYS_MUNMAP:
+			sys_munmap(f);
 			break;
 		default:
 			printf ("system call!\n");
@@ -513,6 +522,40 @@ sys_dup2(struct intr_frame *f) {
 
 }
 
+/* Project 3 - VM */
+static void
+sys_mmap (struct intr_frame *f) {
+	void *addr = (void *)f->R.rdi;
+	size_t length = (size_t)f->R.rsi;
+	int writable = (int)f->R.rdx;
+	int fd = (int) f->R.r10;
+	off_t offset = (off_t) f->R.r8;
+
+	struct fd_info *fd_info = NULL;
+	
+	if ((fd_info = seek_fd_info(thread_current() , fd)) == NULL) {
+		f->R.rax = 0;
+		return;
+	}
+
+	struct file *file = fd_info->file_info->my_file;
+
+	if(file == STDOUT_FILE || file == STDIN_FILE){
+		f->R.rax = 0;
+		return;
+	}
+
+	f->R.rax = (uint64_t) do_mmap(addr, length, writable, file, offset);
+
+}
+
+
+static void
+sys_munmap (struct intr_frame *f) {
+	do_munmap((void *)f->R.rdi);
+}
+//////////////////////////////////////////////
+
 static struct fd_info * dup_fd_info(struct fd_info *oldfd_info, int newfd) {
 	struct fd_info *newfd_info;
 	if((newfd_info = malloc(sizeof(struct fd_info))) != NULL){
@@ -535,10 +578,32 @@ static bool is_invaild_filename(char * filename){
 
 static bool is_valid_buffer(char *buffer, int size, void *arg) {
 	struct thread *curr = thread_current();
-	if (buffer == arg || is_kernel_vaddr(buffer + size) || pml4_get_page(curr->pml4, buffer) == NULL) {
+	
+	if (buffer == NULL || is_kernel_vaddr(buffer + size)) {
+		return false;
+	}
+
+	if (pml4_get_page(curr->pml4, buffer) == NULL) {
+		struct page *p = spt_find_page(&curr->spt, buffer);
+
+		if (p != NULL) {
+			
+			if (p->writable == true) {
+				vm_claim_page(p->va);
+			}
+		}
+		else {
+			uintptr_t cmp_stack = USER_STACK;
+			uintptr_t cmp_addr = (uintptr_t) buffer;
+			if(cmp_addr >= (cmp_stack-(1 << 20)) && p->va < USER_STACK && spt_find_page(&curr->spt, p->va) == NULL){
+					vm_stack_growth(p->va);
+					return true;
+			}
+		}
 		return false;
 	}
 	return true;
+	
 }
 
 static struct fd_info * seek_fd_info (struct thread *curr, int fd) {

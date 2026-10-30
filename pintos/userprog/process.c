@@ -21,6 +21,7 @@
 #include "threads/malloc.h"
 #include "intrinsic.h"
 #include "threads/synch.h"
+#include "user/syscall.h"
 
 #ifdef VM
 #include "vm/vm.h"
@@ -42,6 +43,8 @@ struct fork_args {
 	struct semaphore sema;
 	bool success;
 };
+
+
 
 
 /* General process initializer for initd and other process. */
@@ -895,25 +898,41 @@ install_page (void *upage, void *kpage, bool writable) {
 
 static bool
 lazy_load_segment (struct page *page, void *aux) {
-	/* TODO: Load the segment from the file */
-	/* TODO: This called when the first page fault occurs on address VA. */
-	/* TODO: VA is available when calling this function. */
+	/* TODO: 파일에서 세그먼트를 불러오세요 */
+	/* TODO: 주소 VA에서 첫 번째 페이지 폴트가 발생할 때 호출됩니다. */
+	/* TODO: 이 함수가 호출될 때 VA는 유효한 상태입니다. */
+
+	struct file_load *aux_load = (struct file_load *)aux; // 되는지 모름
+	size_t pg_r_b = aux_load->page_read_bytes;
+
+	lock_acquire(&file_lock);
+	off_t read_bytes =  file_read_at(aux_load->file, page->frame->kva, aux_load->page_read_bytes, aux_load->ofs);
+	if (read_bytes == aux_load->page_read_bytes) {	// 똑디 읽었는지 검사
+		uint8_t *address = page->frame->kva;
+		memset(address + read_bytes, 0, aux_load->page_zero_bytes);	// 0채우기
+	}
+	lock_release(&file_lock);
+
+	free(aux_load);	// 자유
+	if (read_bytes == pg_r_b) {
+		return true;
+	}
+	else {
+		return false;
+	}
 }
 
-/* Loads a segment starting at offset OFS in FILE at address
- * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
- * memory are initialized, as follows:
- *
- * - READ_BYTES bytes at UPAGE must be read from FILE
- * starting at offset OFS.
- *
- * - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
- *
- * The pages initialized by this function must be writable by the
- * user process if WRITABLE is true, read-only otherwise.
- *
- * Return true if successful, false if a memory allocation error
- * or disk read error occurs. */
+/* FILE의 오프셋 OFS에서 시작하는 세그먼트를 주소 UPAGE에 로드한다. 
+* 총 READ_BYTES + ZERO_BYTES 바이트만큼의 가상 메모리가 다음과 같이 초기화된다:
+*
+* - UPAGE부터 시작하는 READ_BYTES 바이트는 FILE의 오프셋 OFS 위치에서 읽어와야 한다. 
+*
+* - UPAGE + READ_BYTES 위치부터 시작하는 ZERO_BYTES 바이트는 0으로 채워져야 한다. 
+*
+* 이 함수를 통해 초기화된 페이지는 WRITABLE이 참(true)일 경우 사용자 프로세스가 쓸 수 있어야 하며,
+* 그렇지 않은 경우에는 읽기 전용이어야 한다. 
+*
+* 성공하면 참(true)을 반환하고, 메모리 할당 오류나 디스크 읽기 오류가 발생하면 거짓(false)을 반환한다. */
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
@@ -928,17 +947,31 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
+
+		struct file_load *aux = malloc(sizeof(struct file_load));
+		if (aux == NULL) {
 			return false;
+		}
+
+		aux->file = file;
+		aux->ofs = ofs;
+		aux->page_read_bytes = page_read_bytes;
+		aux->page_zero_bytes = page_zero_bytes;
+
+		/* TODO: Set up aux to pass information to the lazy_load_segment. */
+		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable, lazy_load_segment, (void *)aux)) {
+			free(aux);
+			return false;
+		}
+			
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += page_read_bytes;
 	}
+	
 	return true;
 }
 
@@ -948,10 +981,17 @@ setup_stack (struct intr_frame *if_) {
 	bool success = false;
 	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
 
-	/* TODO: Map the stack on stack_bottom and claim the page immediately.
-	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
-	/* TODO: Your code goes here */
+	/* TODO: stack_bottom 위치에 스택을 매핑하고 해당 페이지를 즉시 할당(claim)하십시오. 
+	 * TODO: 성공 시, rsp를 그에 맞춰 설정하십시오. 
+	 * TODO: 해당 페이지가 스택임을 표시해야 합니다. */
+	/* TODO: 여기에 코드를 작성하십시오. */
+
+	if (vm_alloc_page(VM_ANON,stack_bottom, true) == true) {
+		if(vm_claim_page(stack_bottom) == true) {
+			if_->rsp = USER_STACK;
+			success = true;
+		}
+	}
 
 	return success;
 }

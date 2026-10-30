@@ -675,6 +675,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init(&t->child_list);
 	t->my_info = NULL;
 
+	list_init(&t->mmap_list);
+
 	if(thread_mlfqs){
 		enum intr_level old_level = intr_disable();
 		list_push_front(&all_list, &(t->all));

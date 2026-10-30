@@ -115,6 +115,8 @@ typedef int tid_t;
 	struct wait_info *my_info;
 	struct file *running_file;			/* 현재 실행중인 파일 */
 
+	struct list mmap_list;				/* 매핑 리스트 */
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
