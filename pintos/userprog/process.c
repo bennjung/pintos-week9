@@ -732,6 +732,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	if_->R.rsi = rsp + 8; // rsi는 숫자 칸이어서 그대로 써야함  
 	if_->rsp = rsp;
 
+
 	success = true;
 
 done:

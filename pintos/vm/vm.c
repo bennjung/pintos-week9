@@ -44,6 +44,7 @@ unsigned page_hash(const struct hash_elem *p_, void *aux);
 bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux);
 bool page_uninit_copy(struct page *src, struct page *dst);
 bool page_frame_copy(struct page *src, struct page *dst);
+bool is_stack_valid(uintptr_t stp , uint64_t addr);
 
 
 /* Create the pending page object with initializer. If you want to create a
@@ -176,6 +177,8 @@ vm_get_frame (void) {
 /* Growing the stack. */
 static void
 vm_stack_growth (void *addr UNUSED) {
+	// alloc anon page
+	vm_alloc_page(VM_ANON |  VM_MARKER_0, pg_round_down(addr), true);
 }
 
 /* Handle the fault on write_protected page */
@@ -194,14 +197,39 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	if (is_kernel_vaddr(addr) || (int) addr >= USER_STACK){
 		return false;
 	}
-	
 	page = spt_find_page(spt, addr);
 	if (page == NULL){
+		uintptr_t stp ;
+		// stack validity 
+		if (user){
+			stp = f->rsp;
+		}
+		else {
+			stp = thread_current()->rsp;
+		}
+		if (is_stack_valid(stp, (uintptr_t) addr)){
+			vm_stack_growth(addr);
+			return vm_claim_page(addr);
+		}
 		return false;
 	}
 	/* TODO: Your code goes here */
 
 	return vm_do_claim_page (page);
+}
+
+bool
+is_stack_valid(uintptr_t stp , uintptr_t addr) {
+	if (addr >= stp - 8 ){
+		return true;
+	}
+	
+	if (addr < USER_STACK - (PGSIZE*256)) {
+		return true;
+	}
+
+	return false;
+
 }
 
 /* Free the page.

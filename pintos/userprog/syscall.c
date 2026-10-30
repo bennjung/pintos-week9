@@ -76,6 +76,7 @@ void
 syscall_handler (struct intr_frame *f UNUSED) {
 
 	uint64_t syscall_num = f->R.rax;
+	thread_current()->rsp = f->rsp;
 	switch (syscall_num){
 		case SYS_HALT:
 			sys_halt(f);
@@ -535,9 +536,24 @@ static bool is_invaild_filename(char * filename){
 
 static bool is_valid_buffer(char *buffer, int size, void *arg) {
 	struct thread *curr = thread_current();
-	if (buffer == arg || is_kernel_vaddr(buffer + size) || pml4_get_page(curr->pml4, buffer) == NULL) {
+	if (buffer == arg || is_kernel_vaddr(buffer + size)) {
 		return false;
 	}
+	// [DEBUG]
+	// if (buffer == arg){
+	// 	printf("buffer error \n");
+	// 	return false;
+	// }
+
+	// else if (is_kernel_vaddr(buffer + size)){
+	// 	printf("kernel VADDR ERROR \n");
+	// 	return false;
+	// }
+
+	// else {
+	// 	printf("pml4 ERROR \n");
+	// 	return false;
+	// }
 	return true;
 }
 
